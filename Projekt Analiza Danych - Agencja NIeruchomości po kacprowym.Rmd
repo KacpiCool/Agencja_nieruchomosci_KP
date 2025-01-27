@@ -1,0 +1,392 @@
+---
+title: "Projekt Analiza Danych - Agencja Nieruchomości"
+author: "Kacper Kulesza, Paweł Suszczak"
+date: "2024-12-18"
+output: 
+  html_document:
+    theme: cerulean
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,      # Ukrywa kod w wynikowym dokumencie
+  message = FALSE,   # Ukrywa komunikaty generowane przez pakiety
+  warning = FALSE    # Ukrywa ostrzeżenia
+)
+options(scipen = 999, digits=3)
+library(tidyverse) 
+library(xfun)
+library(rmdformats)  
+library(magrittr)   
+library(lubridate)  
+library(dplyr)
+library(knitr)
+library(ggplot2)
+library(reshape2)
+library(ggstatsplot)
+library(rstantools)
+library(broom)
+#agencja_nieruchomosci <- read_csv("C:/Users/suchy/OneDrive/Pulpit/Pliki studia/5 rok/Analiza Danych/agencja_nieruchomosci.csv") #moja ścieżka
+agencja_nieruchomosci <- read_csv("C:/Users/Kacper/Desktop/agencja_nieruchomosci.csv") #a to moja sciezka
+
+View(agencja_nieruchomosci)
+```
+
+## Opis naszego projektu
+
+Tutaj dodamy opis naszego projektu z Analizy Danych
+
+## Sprawdzanie danych
+
+```{r echo=FALSE}
+library(knitr)
+library(kableExtra)
+
+# Tworzenie ramki danych dla braków
+missing_data <- data.frame(
+  Zmienna = names(agencja_nieruchomosci),
+  Liczba_Braków = colSums(is.na(agencja_nieruchomosci))
+)
+
+# Poprawne generowanie tabeli
+kbl(missing_data, col.names = c("Zmienna", "Liczba Braków"), row.names = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+```
+
+
+Analiza danych potwierdziła, że nasze zbiory są kompletne i pozbawione braków. Dzięki temu możliwe jest pełne wykorzystanie dostępnych informacji do przeprowadzenia analizy oraz uzyskania rzetelnych wyników. Nie ma potrzeby edycji bazy danych.
+
+
+```{r echo=FALSE}
+IQR_value <- IQR(agencja_nieruchomosci$price)
+upper_bound <- quantile(agencja_nieruchomosci$price, 0.75) + 3 * IQR_value
+lower_bound <- quantile(agencja_nieruchomosci$price, 0.25) - 3 * IQR_value
+boxplot(agencja_nieruchomosci$price, main = "Wykres pudełkowy ceny", 
+        xlab = "Price", ylab = "Wartości", 
+        col = "green", border = "black", outline = TRUE, lwd = 1.2,
+        range = 3) 
+abline(h = upper_bound, col = "red", lty = 2)
+abline(h = lower_bound, col = "red", lty = 2)
+
+```
+
+**Interpretacja wykresu**
+
+Gruba linia w środku pudełka wskazuje medianę, która wynosi około 5 500 000. Na wykresie wąs powyżej pudełka jest znacznie dłuższy niż wąs poniżej, co wskazuje na większe zróżnicowanie w górnym przedziale cen. Taki rozkład może wynikać z obecności luksusowych nieruchomości, które charakteryzują się znacznie wyższymi cenami niż większość pozostałych nieruchomości. W zestawie danych widoczny jest również pojedynczy punkt powyżej górnego wąsa, który wskazuje na wartość odstającą – wyjątkowo drogą nieruchomość. Większość obserwacji znajduje się w zakresie od 4 000 000 do 7 000 000, co sugeruje, że ceny są względnie jednorodne w tym przedziale.
+
+**Badanie rozkładu cen za metr kwadratowy pod względem wielkości (metrażu) nieruchomości**
+
+W tabeli poniżej przedstawiono statystyki opisowe ceny za metr kwadratowy w zależności od wielkości nieruchomości. Metraż nieruchomości został podzielony na 3 grupy- mały, średni oraz duży. Analiza obejmuje takie miary, jak średnia, mediana i wartość minimalna.
+
+```{r echo=FALSE}
+# Zmiana stóp kwadratowych na metry kwadratowe
+
+agencja_nieruchomosci <- agencja_nieruchomosci %>%
+  mutate(area = area*0.092903)
+
+# Cena za metr kwadratowy oraz cena za ilość pokoi
+
+agencja_nieruchomosci$price_per_sqft <- agencja_nieruchomosci$price / agencja_nieruchomosci$area
+  agencja_nieruchomosci <- agencja_nieruchomosci %>%
+    relocate(price_per_sqft, .after= price)
+  
+agencja_nieruchomosci$price_per_bedroom <- agencja_nieruchomosci$price / agencja_nieruchomosci$bedrooms 
+  agencja_nieruchomosci <- agencja_nieruchomosci %>%
+  relocate(price_per_bedroom, .after = price_per_sqft)
+
+# Zaokrąglanie do dwóch miejsc po przecinku w kolumnie price_per_sqft
+
+agencja_nieruchomosci <- agencja_nieruchomosci %>%
+  mutate(area = round(area,2),
+    price_per_sqft = round(price_per_sqft,2))
+
+#Ograniczenia zmiennych
+
+agencja_nieruchomosci <- agencja_nieruchomosci %>%
+  filter(
+    price >= 0,
+    bedrooms > 0,
+    bathrooms >0
+  )
+
+```
+
+
+```{r echo=FALSE}
+
+# Utworzenie przedziałów metrażowych
+breaks <- quantile(agencja_nieruchomosci$area, probs=seq(0,1, length.out=4), na.rm = TRUE)
+labels <- c("Małe", "Średnie", "Duże")
+agencja_nieruchomosci$area_group <- cut(agencja_nieruchomosci$area, breaks=breaks, labels=labels, include.lowest = TRUE)
+agencja_nieruchomosci <- agencja_nieruchomosci %>%
+  relocate(area_group, .after = area)
+
+
+# Agregacja danych dla ceny za m2
+price_per_sqft_stats <- agencja_nieruchomosci %>%
+  group_by(area_group) %>%
+  summarise(
+    Liczba = n(),
+    `Cena za m2` = mean(price_per_sqft, na.rm = TRUE),
+    `Mediana za m2` = median(price_per_sqft, na.rm = TRUE),
+    `Min za m2` = min(price_per_sqft, na.rm = TRUE),
+    `Max za m2` = max(price_per_sqft, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+cat("\n")
+
+kable(price_per_sqft_stats, format = "html", caption = "Średnie ceny za metr kwadratowy w zależności od grup metrażowych") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "bordered"), # Dodanie ramki
+    full_width = FALSE,  # Tabela o stałej szerokości
+    position = "center"  # Wyśrodkowanie tabeli
+  )
+
+```
+
+Analizując przedstawioną tabelę, można zauważyć, że średnia cena za metr kwadratowy jest najwyższa w przypadku małych nieruchomości i zmniejsza się wraz ze wzrostem metrażu - jest to sytuacja powszechna na rynku nieruchomości. Jak ma to często miejsce podczas nabywania produktów na rynku, im większe zamówienie tym mniejsza cena jednostkowa. Dodatkowo, różnica między ceną maksymalną a minimalną (zakres cen) jest największa w przypadku dużych nieruchomości. Sugeruje to większe zróżnicowanie w tej kategorii, które może być związane z różnicami w lokalizacji, standardzie wykończenia lub dodatkowymi udogodnieniami.
+
+## Analiza korelacji
+W poniższej analizie przeprowadzono badanie korelacji między kluczowymi zmiennymi numerycznymi w zestawie danych agencji nieruchomości. Przedstawiona mapa ciepła przedstawia wyniki obliczeń współczynników korelacji Pearsona, które mogą przyjmować wartości od -1 do 1. 
+
+```{r echo=FALSE}
+
+numeryczne_zmienne <- agencja_nieruchomosci %>% 
+  select(price_per_sqft, area, bedrooms, bathrooms, stories, parking)
+
+korelacja <- cor(numeryczne_zmienne, use = "complete.obs")
+
+korelacja_melted <- melt(korelacja)
+
+ggplot(data = korelacja_melted, aes(x=Var1, y=Var2, fill=value)) +
+  geom_tile(color = "black", size = 0.5) +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Korelacja") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),plot.title = element_text(hjust = 0.45) ) +
+  labs(x='', y='', title='Mapa ciepła korelacji między zmiennymi')
+
+```
+Mapa ciepła korelacji przedstawia stopień powiązań pomiędzy różnymi cechami nieruchomości. Wyróżniają się następujące obserwacje:
+
+- **Cena za metr kwadratowy (price_per_sqft)**:
+
+- Wykazuje umiarkowaną ujemną korelację z powierzchnią (area), co sugeruje, że większe nieruchomości są tańsze w przeliczeniu na metr kwadratowy.
+- Ma niewielką dodatnią korelację z liczbą sypialni (bedrooms), łazienek (bathrooms) i pięter (stories), co może wskazywać, że te cechy lekko podnoszą cenę za metr kwadratowy.
+- Nie zauważono istotnej korelacji z liczbą miejsc parkingowych (parking), co oznacza, że ta cecha nie wpływa znacząco na cenę.
+
+- **Powierzchnia (area)**:
+
+- Umiarkowana dodatnia korelacja z liczbą miejsc parkingowych (parking) sugeruje, że większe nieruchomości częściej oferują więcej miejsc postojowych.
+- Słaba dodatnia korelacja z liczbą sypialni (bedrooms) i łazienek (bathrooms) wskazuje, że większa powierzchnia wiąże się z większą liczbą pomieszczeń, choć zależność ta nie jest silna.
+
+- **Sypialnie (bedrooms)**:
+
+- Umiarkowana korelacja z łazienkami (bathrooms) i liczbą pięter (stories) pokazuje, że większa liczba sypialni często oznacza więcej łazienek i kondygnacji w nieruchomości.
+- Słaba korelacja z liczbą miejsc parkingowych (parking) wskazuje, że liczba sypialni nie jest silnie związana z dostępnością parkingu.
+
+- **Łazienki (bathrooms)**:
+
+- Mają umiarkowaną korelację z liczbą pięter (stories), co sugeruje, że w domach wielopoziomowych jest zazwyczaj więcej łazienek.
+
+- **Liczba pięter (stories)**:
+
+- Słabo koreluje z powierzchnią (area) i miejscami parkingowymi (parking), co oznacza, że te cechy nie są silnie powiązane z liczbą kondygnacji.
+
+- **Miejsca parkingowe (parking)**:
+
+- Silniejsza korelacja z powierzchnią (area) niż z innymi cechami sugeruje, że większe nieruchomości częściej oferują więcej miejsc parkingowych.
+
+
+## Wnioskowanie statystyczne
+
+**Pytanie badawcze:** Cena nieruchomości uzależniona od ilości łazienek
+
+**Hipoteza zerowa (H0):** Nie ma statystycznie istotnej różnicy w cenie nieruchomości w zależniości od liczby łazienek.
+
+**Hipoteza alternatywna (H1)**: Istnieje statystycznie istotna różnica w cenie nieruchomości w zależniości od liczby łazienek.
+
+
+```{r echo=FALSE}
+ggbetweenstats(
+  data=agencja_nieruchomosci,
+  x=bathrooms,
+  y=price
+)
+```
+
+
+**Wnioski**
+
+Wartość p-value wynosi ok. 0,00, czyli mniej niż standardowy poziom istotności 0,05. W takiej sytuacji mamy możliwość odrzucenia hipotezy zerowej, na rzecz hipotezy alternatywnej , sugerując tym samym, iż liczba łazienek wykazuje istotne statystycznie różnice w cenien nieruchomości.
+
+
+**Pytanie badawcze:** Cena za metr kwadratowy uzależniona jest od liczby pięter w domu
+
+**Hipoteza zerowa (H0):** Nie ma statystycznie istotnej różnicy w cenie za metr kwadratowy w zależniości od liczby pięter.
+
+**Hipoteza alternatywna (H1)**: Istnieje statystycznie istotna różnica w cenie metr kwadratowy w zależniości od liczby pięter.
+
+```{r echo=FALSE}
+ggbetweenstats(
+  data=agencja_nieruchomosci,
+  x=stories,
+  y=price_per_sqft
+)
+```
+
+**Wnioski**
+
+Wartość p-value wynosi 0,000, czyli znacznie mniej niż standardowy poziom istotności 0,05. W takiej sytuacji mamy możliwość odrzucenia hipotezy zerowej, na rzecz hipotezy alternatywnej , sugerując tym samym, iż cena za metr kwadratowy wykazuje istotne statystycznie różnice w zależniości od liczby pięter.
+
+**Pytanie badawcze:** Cena przypadająca na jedną sypialnie uzależniona od ilości sypialnii
+
+**Hipoteza zerowa (H0):** Nie ma statystycznie istotnej różnicy w cenie przypadającej na jedną sypialnię w zależniości od liczby sypialnii.
+
+**Hipoteza alternatywna (H1)**: Istnieje statystycznie istotna różnica w cenie przypadającej na jedną sypialnię w zależniości od liczby sypialnii.
+
+```{r echo=FALSE}
+ggbetweenstats(
+  data=agencja_nieruchomosci,
+  x=bedrooms,
+  y=price_per_bedroom
+)
+```
+
+**Wnioski**
+
+Wartość p-value wynosi 0,01, czyli mniej niż standardowy poziom istotności 0,05. W takiej sytuacji mamy możliwość odrzucenia hipotezy zerowej, na rzecz hipotezy alternatywnej , sugerując tym samym, iż cena przypadająca na jedną sypialnie wykazuje istotne statystycznie różnice w zależniości od liczby sypialnii.
+
+**Pytanie badawcze:** Cena za metr kwadratowy nieruchomości uzależniona stanu wyposażenia
+
+**Hipoteza zerowa (H0):** Srednia cena za metr kwadratowy jest taka sama dla wszystkich stanów wyposażenia.
+
+**Hipoteza alternatywna (H1)**: Srednia cena za metr kwadratowy nie jest taka sama dla wszystkich stanów wyposażenia.
+
+```{r echo=FALSE}
+
+anova1 <- aov(price_per_sqft ~ furnishingstatus, data = agencja_nieruchomosci)
+anova_summary <- summary(anova1)
+
+tidy_anova <- tidy(anova1)
+
+kable(tidy_anova, caption = "Analiza wariancji dla ceny za metr kwadratowy w zależności od stanu wyposażenia", format = "html", digits = 2)
+
+```
+
+**Wnioski**
+
+Test ANOVA wartość p-value równą 0,00007, czyli mniej niż standardowy poziom istotności 0,05.W takiej sytuacji mamy możliwość odrzucenia hipotezy zerowej, na rzecz hipotezy alternatywnej , sugerując tym samym, iż stan wyposażenia istotnie wpływa na cenę za metr kwadratowy.
+
+
+**Pytanie badawcze:** Liczba miejsc parkingowych dostępnych w budynku uzależniony od wielkości nieruchomości
+
+**Hipoteza zerowa (H0):** Nie ma statystycznie istotnej różnicy w liczbie miejsc parkingowych dostępnych w budynku w zależniości od wielkości nieruchomości.
+
+**Hipoteza alternatywna (H1)**: Istnieje statystycznie istotna różnica w liczbie miejsc parkingowych dostępnych w budynku
+
+```{r echo=FALSE}
+anova2 <- aov(parking ~ area_group, data = agencja_nieruchomosci)
+
+tidy_anova2 <- tidy(anova2)
+
+
+kable(tidy_anova2, caption = "Analiza wariancji dla liczby miejsc parkingowych w zależności od wielkości nieruchomości", format = "html", digits = 3)
+
+```
+
+**Wnioski**
+
+Test ANOVA wartość p-value wynosi ok. 0,000, czyli znacznie mniej niż standardowy poziom istotności 0,05. W takiej sytuacji mamy możliwość odrzucenia hipotezy zerowej, na rzecz hipotezy alternatywnej , sugerując tym samym, iż liczba miejsc parkingowych dostępnych w budynku wykazuje istotne statystycznie różnice w wielkości nieruchomości.
+
+
+**Pytanie badawcze:** Cena nieruchomości jest uzależniona od statusu umeblowania nieruchomości
+
+**Hipoteza zerowa (H0):** Nie ma statystycznie istotnej różnicy w cenie w zależności od statusu umeblowania nieruchomości
+
+**Hipoteza alternatywna (H1)**: Istnieje statystycznie istotna różnica w cenie w zależności od statusu umeblowania nieruchomości
+j
+```{r echo = FALSE}
+ggbetweenstats(data=agencja_nieruchomosci, x= furnishingstatus, y=price)
+```
+
+**Wnioski**
+
+Oś X przedstawia kategorie związane ze statusem umeblowania, a oś Y reprezentuje cenę nieruchomości. Wartość p mniejsza niż 0,05 sugeruje, że różnice między kategoriami są istotne statystycznie. Dla tego wykresu wszystkie porównane pary kategorii mają wartości p znacznie mniejsze niż 0,05, co sugeruje, że istnieją istotne różnice między tymi trzema kategoriami. Odrzucamy więc hipotezę zerową. Możemy zatem stwierdzić, że cena nieruchomości jest uzależniona od statusu umeblowania nieruchomości
+
+
+**Pytanie badawcze:** Cena za m2 uzależniona jest od tego czy nieruchomość znajduje się w preferowanej lokalizacji
+
+**Hipoteza zerowa (H0):** Nie ma statystycznie istotnej różnicy w cenie za m2 w zależności od tego czy nieruchomość znajduje się w preferowanej lokalizacji
+
+**Hipoteza alternatywna (H1)**: Istnieje statystycznie istotna różnica w cenie m2 w zależności od tego czy  nieruchomość znajduje się w preferowanej lokalizacji
+
+```{r echo = FALSE}
+ggbetweenstats(data=agencja_nieruchomosci, x= prefarea, y=price_per_sqft)
+```
+
+**Wnioski**
+
+Na osi X mamy podane czy nieruchomość znajduje się w preferowanej okolicy - tak lub nie, a na osi Y natomiast widnieje cena za m2 nieruchomości. Dla nieruchomości z preferowaną lokalizacją widzimy wyższe wartości cenowe. Rozkład wartości jest wyraźnie różny porównując te dwie grupy. Wartość p-value wynosząca 0,01 sugeruje, że istnieje zależność pomiędzy ceną za m2, a preferowaną lokalizacją nieruchomości.
+
+
+**Pytanie badawcze:** Liczba sypialni jest uzależnionaod od liczby pięter
+
+**Hipoteza zerowa (H0):** Nie ma statystycznie istotnej różnicy w liczbie sypialni w zależności od liczby pięter
+
+**Hipoteza alternatywna (H1)**: Istnieje statystycznie istotna różnica w liczbie sypialni w zależności od liczby pięter
+
+```{r echo = FALSE}
+ggbarstats(data=agencja_nieruchomosci, x=stories, y=bedrooms)
+```
+
+**Wnioski**
+
+Oś pozioma przedstawia liczbę sypialni w nieruchomości, a oś pionowa pokazuje procentową częstotliwość określonej kategorii (liczby pięter) w ramach każdej grupy. W większośc grup p-value ma mniejszą wartość niż 0,05. Tylko skrajne grupy mają p-value na poziomie 0,11. Ogółem możemy stwierdzić, że liczba pięter w nieruchomości ma wpływ na liczbę sypialni.``
+
+
+**Pytanie badawcze:** Liczba łazienek jest uzależniona od liczby sypialni 
+
+**Hipoteza zerowa (H0):** Nie ma statystycznie istotnej różnicy w liczbie łazienek w zależności od liczby sypialni
+
+**Hipoteza alternatywna (H1)**: Istnieje statystycznie istotna różnica w liczbie łazienek w zależności od liczby sypialni
+
+
+```{r echo = FALSE}
+ggpiestats(data=agencja_nieruchomosci, x=bedrooms, y=bathrooms)
+```
+
+**Wnioski**
+
+Na ostatnim wykresie mamy serię wykresów kołowych, które przedstawiają rozkład liczby sypialni w nieruchomościach, podzielony według liczby łazienek. Każdy wykres kołowy odpowiada nieruchomościom z określoną liczbą łazienek i pokazuje procentowy rozkład liczby sypialni w tych nieruchomościach. Podobnie jak w poprzednim wykresie, tylko skrajna grupa ma p-value większe od 0,05. Znajduję się tam jednak tylko jedna obserwacja. Ogólnie możemy powiedzieć, że liczba łazienek jest uzależniona od liczby sypialni w nieruchomościach.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
