@@ -474,7 +474,9 @@ ggpiestats(data=agencja_nieruchomosci, x=bathrooms, y=bedrooms)
 Na ostatnim wykresie mamy serię wykresów kołowych, które przedstawiają rozkład liczby sypialni w nieruchomościach, podzielony według liczby łazienek. Każdy wykres kołowy odpowiada nieruchomościom z określoną liczbą sypialni i pokazuje procentowy rozkład liczby łazienek w tych nieruchomościach. W tym przypadku aż połowa grup ma wartości p - value większe niż 0,05. Co oznacza, że w przypadku grupy 1 , 5 i 6 nie mamy podstaw do odrzucenia hipotezy zerowej i nie ma statystycznie istotnej różnicy w liczbie sypialni w zależności od liczby łazienek.
 
 
+## Podsumowanie
 
+Analiza danych dotyczących nieruchomości pozwoliła określić, które czynniki mają istotny wpływ na cenę za metr kwadratowy. Wyniki testów statystycznych, w tym analizy wariancji (ANOVA), wykazały, że niektóre zmienne, takie jak liczba sypialni, łazienek czy lokalizacja, mogą znacząco różnicować ceny. W przypadkach, gdzie wartość p była niższa niż 0,05, odrzucono hipotezę zerową, co sugeruje istnienie istotnych zależności. Natomiast w sytuacjach, gdzie p-value przekroczyło ten poziom, nie znaleziono wystarczających dowodów na wpływ danej cechy na cenę nieruchomości. Ostateczne wnioski wskazują, że wybrane parametry nieruchomości mogą istotnie kształtować jej wartość rynkową, co może mieć praktyczne zastosowanie w prognozowaniu cen i podejmowaniu decyzji inwestycyjnych.
 
 
 
